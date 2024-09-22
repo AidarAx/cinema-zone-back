@@ -9,6 +9,7 @@ import { ModelType } from '@typegoose/typegoose/lib/types'
 import { AuthDto } from './dto/auth.dto'
 import { compare, genSalt, hash } from 'bcryptjs'
 import { JwtService } from '@nestjs/jwt'
+import { RefreshTokenDto } from './dto/refreshToken.dto'
 
 @Injectable()
 export class AuthService {
@@ -39,26 +40,47 @@ export class AuthService {
 	}
 
 	async register(dto: AuthDto) {
-		const oldUser = await this.userModel.findOne({ email: dto.email })
+		const existingUser = await this.userModel.findOne({ email: dto.email })
 
-		if (oldUser) {
+		if (existingUser) {
 			throw new BadRequestException(
 				`Пользователь с почтовым адресом ${dto.email} уже существует`
 			)
 		}
 
 		const salt = await genSalt(10)
-		const hashPassword = await hash(dto.password, salt)
+		const hashedPassword = await hash(dto.password, salt)
 
 		const newUser = await this.userModel.create({
 			email: dto.email,
-			password: hashPassword,
+			password: hashedPassword,
 		})
 
 		const tokens = await this.issueTokenPair(String(newUser._id))
 
 		return {
 			user: this.getUserFields(newUser),
+			...tokens,
+		}
+	}
+
+	async getNewTokens({ refreshToken }: RefreshTokenDto) {
+		if (!refreshToken) {
+			throw new UnauthorizedException('Пожалуйста авторизуйтесь')
+		}
+
+		const result = await this.jwtService.verifyAsync(refreshToken)
+
+		if (!result) {
+			throw new UnauthorizedException('Токен не валидный')
+		}
+
+		const user = await this.userModel.findById(result._id)
+
+		const tokens = await this.issueTokenPair(String(user._id))
+
+		return {
+			user: this.getUserFields(user),
 			...tokens,
 		}
 	}
